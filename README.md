@@ -25,23 +25,69 @@ mix deps.get
 cp config/example.toml config/local.toml
 ```
 
-3. Start load test (script wrapper, no `mix` command needed):
+3. Start load test as a **manager** (script wrapper, no `mix` command needed):
 
 ```bash
-./scripts/squeezer.sh config/local.toml
+ROLE=manager ./scripts/squeezer.sh config/local.toml
 ```
 
 The script auto-runs `mix deps.get` only when dependencies are missing.
 
-Or run the Mix task directly:
+Or run the Mix task directly as manager:
 
 ```bash
-mix squeezer.run config/local.toml
+mix squeezer.run config/local.toml --role manager
+```
+
+## Distributed manager/worker mode
+
+This app can run in two roles:
+
+- **Manager**: coordinates the squeeze test and aggregates stats.
+- **Worker**: joins the manager node and runs worker segments via RPC.
+
+Use standard distributed Elixir node flags (`--sname`/`--name`, `--cookie`) for clustering.
+
+### 1) Start worker node(s)
+
+```bash
+iex --sname worker1 --cookie squeeze -S mix squeezer.run --role worker --manager manager@your-host
+```
+
+### 2) Start manager node
+
+```bash
+iex --sname manager --cookie squeeze -S mix squeezer.run config/local.toml --role manager --worker worker1@your-host
+```
+
+You can repeat `--worker` multiple times to add more worker nodes.
+
+Worker nodes connect using `Node.connect/1`/`Node.ping/1`; manager orchestration is performed via `:rpc.call/4`.
+
+### Script mode
+
+- Manager:
+
+```bash
+ROLE=manager ./scripts/squeezer.sh config/local.toml --worker worker1@your-host
+```
+
+- Worker:
+
+```bash
+ROLE=worker MANAGER_NODE=manager@your-host ./scripts/squeezer.sh
 ```
 
 ## Run in containers (Docker Compose)
 
 This repo includes container artifacts for running both `moya_db` and `moya_squeezer` together.
+
+The compose setup codifies a **1 Manager + 3 Workers** topology:
+
+- `manager` runs the squeeze coordinator node (`manager@manager`)
+- `worker1`, `worker2`, `worker3` run worker nodes
+- all nodes share the same Erlang cookie (`squeeze_cookie`)
+- workers join via `--manager manager@manager`
 
 1. Ensure `moya_db` source exists at `~/moya_db` (used as compose build context).
 2. Build images:
@@ -50,17 +96,41 @@ This repo includes container artifacts for running both `moya_db` and `moya_sque
 docker compose build
 ```
 
-3. Run squeeze test stack:
+3. Run manager + workers + db:
 
 ```bash
 docker compose up --abort-on-container-exit
 ```
+
+This launches one `moya_squeezer:latest` image as 4 containers (1 manager, 3 workers).
 
 4. Tear down:
 
 ```bash
 docker compose down
 ```
+
+### If Compose is unavailable on your machine
+
+Use the provided scripts to run the same 1-manager + 3-worker topology with plain Docker:
+
+```bash
+chmod +x scripts/run_cluster.sh scripts/stop_cluster.sh
+./scripts/run_cluster.sh
+```
+
+Stop and clean up:
+
+```bash
+./scripts/stop_cluster.sh
+```
+
+Notes:
+
+- `scripts/run_cluster.sh` builds `moya_squeezer:latest`, creates `moya_net`, starts `moya_db`, then starts `worker1..3` and `manager`.
+- Workers join manager using distributed node names and shared cookie (`squeeze_cookie`).
+- Override defaults with env vars: `IMAGE_NAME`, `DB_IMAGE`, `NETWORK_NAME`, `COOKIE`, `CONFIG_PATH`.
+- For Colima/no-Docker-Hub workflows, the Dockerfile supports a local base image via `BASE_IMAGE` (default `elixir:1.19.0`). Example: `BASE_IMAGE=elixir:1.19.0 ./scripts/run_cluster.sh`.
 
 Container config lives at `config/docker.toml` and targets:
 

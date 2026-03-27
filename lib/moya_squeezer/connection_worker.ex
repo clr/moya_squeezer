@@ -98,6 +98,7 @@ defmodule MoyaSqueezer.ConnectionWorker do
     maybe_update_key_pool(request_type, key, response_code, state)
 
     MoyaSqueezer.MetricsLogger.log(state.logger, %{
+      source_node: Atom.to_string(node()),
       request_type: request_type,
       started_at_ms: started_at_ms,
       db_latency_us: db_latency_us,

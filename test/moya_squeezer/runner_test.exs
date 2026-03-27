@@ -44,4 +44,31 @@ defmodule MoyaSqueezer.RunnerTest do
     assert output =~ "[final]"
     assert output =~ "stop_reason=duration_elapsed"
   end
+
+  test "runner returns error when manager is not distributed but worker nodes are configured" do
+    Application.put_env(:moya_squeezer, :load_adapter, FakeAdapter)
+
+    on_exit(fn ->
+      Application.delete_env(:moya_squeezer, :load_adapter)
+    end)
+
+    assert {:ok, config} =
+             Config.from_map(%{
+               connections: 1,
+               requests_per_second: 10,
+               start_requests_per_second: 10,
+               rps_step: 0,
+               step_interval_seconds: 1,
+               baseline_window_seconds: 1,
+               read_ratio: 0.7,
+               write_ratio: 0.2,
+               delete_ratio: 0.1,
+               payload_size: 8,
+               duration_seconds: 1,
+               warmup_seconds: 0,
+               log_path: "logs/test_runner_metrics_cluster.csv"
+             })
+
+    assert {:error, _reason} = Runner.run(config, worker_nodes: [:"worker1@localhost"])
+  end
 end

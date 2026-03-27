@@ -1,6 +1,6 @@
 connections = 25
 requests_per_second = 500
-start_requests_per_second = 300
+start_requests_per_second = 1500
 rps_step = 50
 step_interval_seconds = 5
 baseline_window_seconds = 10

@@ -1,21 +1,13 @@
-FROM hexpm/elixir:1.17.3-erlang-27.1.2-debian-bookworm-20240812-slim
+ARG BASE_IMAGE=elixir:1.19.0
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY mix.exs mix.lock ./
 COPY config ./config
-
-RUN mix local.hex --force && mix local.rebar --force
-RUN mix deps.get
-
+COPY deps ./deps
+COPY _build ./_build
 COPY lib ./lib
 COPY scripts ./scripts
 
-RUN mix compile
-
-CMD ["mix", "squeezer.run", "config/docker.toml"]
+CMD ["elixir", "-e", "IO.puts(\"moya_squeezer image ready\")"]

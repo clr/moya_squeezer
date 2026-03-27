@@ -34,6 +34,7 @@ defmodule MoyaSqueezer.StatsCollector do
         }
 
   defstruct [
+    :label,
     :window_count,
     :window_errors,
     :window_durations_us,
@@ -64,11 +65,14 @@ defmodule MoyaSqueezer.StatsCollector do
   def percentile_ms(server, p), do: GenServer.call(server, {:percentile_ms, p}, 10_000)
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
+    label = Keyword.get(opts, :label, "manager")
+
     Process.send_after(self(), :tick, @tick_interval_ms)
 
     {:ok,
      %__MODULE__{
+       label: label,
        window_count: 0,
        window_errors: 0,
        window_durations_us: [],
@@ -102,9 +106,10 @@ defmodule MoyaSqueezer.StatsCollector do
   end
 
   @impl true
-  def handle_call(:reset, _from, _state) do
+  def handle_call(:reset, _from, state) do
     {:reply, :ok,
      %__MODULE__{
+       label: state.label,
        window_count: 0,
        window_errors: 0,
        window_durations_us: [],
@@ -155,7 +160,7 @@ defmodule MoyaSqueezer.StatsCollector do
     error_rate = percentage(state.window_errors, state.window_count)
 
     IO.puts(
-      "[sec] rps=#{state.window_count} " <>
+      "[#{state.label}][sec] rps=#{state.window_count} " <>
         "errors=#{state.window_errors} error_rate=#{Float.round(error_rate, 2)}% " <>
         "p50=#{Float.round(p50, 2)}ms p90=#{Float.round(p90, 2)}ms p95=#{Float.round(p95, 2)}ms"
     )
