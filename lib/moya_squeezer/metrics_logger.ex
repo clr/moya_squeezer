@@ -2,12 +2,13 @@ defmodule MoyaSqueezer.MetricsLogger do
   @moduledoc """
   Buffered append-only metrics writer.
 
-  Flushes every 5ms so high request rates do not perform one disk write per request.
+  Flushes on a configurable interval (default 10ms) so high request rates do not
+  perform one disk write per request.
   """
 
   use GenServer
 
-  @flush_interval_ms 5
+  @default_flush_interval_ms 10
 
   @type metric :: %{
           request_type: :read | :write | :delete,
@@ -17,7 +18,7 @@ defmodule MoyaSqueezer.MetricsLogger do
           response_code: integer()
         }
 
-  defstruct [:io_device, :buffer]
+  defstruct [:io_device, :buffer, :flush_interval_ms]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -30,6 +31,12 @@ defmodule MoyaSqueezer.MetricsLogger do
   @impl true
   def init(opts) do
     log_path = Keyword.fetch!(opts, :log_path)
+    flush_interval_ms = Keyword.get(opts, :flush_interval_ms, @default_flush_interval_ms)
+
+    if not (is_integer(flush_interval_ms) and flush_interval_ms > 0) do
+      raise ArgumentError, "flush_interval_ms must be a positive integer"
+    end
+
     File.mkdir_p!(Path.dirname(log_path))
     {:ok, io_device} = File.open(log_path, [:append, :utf8])
 
@@ -39,27 +46,27 @@ defmodule MoyaSqueezer.MetricsLogger do
         "bucket_ms,source_node,request_type,started_at_ms,db_latency_us,response_code\n"
       )
 
-    Process.send_after(self(), :flush, @flush_interval_ms)
+    Process.send_after(self(), :flush, flush_interval_ms)
 
-    {:ok, %__MODULE__{io_device: io_device, buffer: []}}
+    {:ok, %__MODULE__{io_device: io_device, buffer: [], flush_interval_ms: flush_interval_ms}}
   end
 
   @impl true
   def handle_cast({:log, metric}, state) do
-    line = metric_to_csv(metric)
+    line = metric_to_csv(metric, state.flush_interval_ms)
     {:noreply, %{state | buffer: [line | state.buffer]}}
   end
 
   @impl true
   def handle_info(:flush, %{buffer: []} = state) do
-    Process.send_after(self(), :flush, @flush_interval_ms)
+    Process.send_after(self(), :flush, state.flush_interval_ms)
     {:noreply, state}
   end
 
   def handle_info(:flush, state) do
     payload = state.buffer |> Enum.reverse() |> IO.iodata_to_binary()
     :ok = IO.binwrite(state.io_device, payload)
-    Process.send_after(self(), :flush, @flush_interval_ms)
+    Process.send_after(self(), :flush, state.flush_interval_ms)
     {:noreply, %{state | buffer: []}}
   end
 
@@ -74,8 +81,8 @@ defmodule MoyaSqueezer.MetricsLogger do
     :ok
   end
 
-  defp metric_to_csv(metric) do
-    bucket_ms = metric.started_at_ms |> div(@flush_interval_ms) |> Kernel.*(@flush_interval_ms)
+  defp metric_to_csv(metric, flush_interval_ms) do
+    bucket_ms = metric.started_at_ms |> div(flush_interval_ms) |> Kernel.*(flush_interval_ms)
 
     "#{bucket_ms},#{metric.source_node},#{metric.request_type},#{metric.started_at_ms}," <>
       "#{metric.db_latency_us},#{metric.response_code}\n"

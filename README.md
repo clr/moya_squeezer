@@ -2,12 +2,21 @@
 
 Squeeze-testing framework for driving load against an existing database API.
 
+Canonical repository:
+
+- https://github.com/clr/moya_squeezer
+
+Related repositories:
+
+- Deployment/orchestration: https://github.com/clr/moya_harness
+- Database service (Moya): https://github.com/clr/moya
+
 ## What it does
 
 - Reads a TOML file that defines load dimensions.
 - Starts one OTP process per configured logical connection.
 - Generates `read`/`write`/`delete` traffic at the configured requests/second rate.
-- Writes per-request metrics to a log file, buffered and flushed every 5ms.
+- Writes per-request metrics to a log file, buffered and flushed at a configurable interval (`metrics_flush_interval_ms`, default 10ms).
 - Prints per-second runtime stats (achieved RPS, error rate, p50/p90/p95 latency).
 - Handles Ctrl+C gracefully and prints a final summary report.
 
@@ -78,63 +87,52 @@ ROLE=manager ./scripts/squeezer.sh config/local.toml --worker worker1@your-host
 ROLE=worker MANAGER_NODE=manager@your-host ./scripts/squeezer.sh
 ```
 
-## Run in containers (Docker Compose)
+## Run in containers (moved to `moya_harness`)
 
-This repo includes container artifacts for running both `moya_db` and `moya_squeezer` together.
+Multi-service deployment/orchestration for `moya_squeezer` + `moya_db` now lives in the sibling repo:
 
-The compose setup codifies a **1 Manager + 3 Workers** topology:
+- `/Users/clr/moya_harness`
 
-- `manager` runs the squeeze coordinator node (`manager@manager`)
-- `worker1`, `worker2`, `worker3` run worker nodes
-- all nodes share the same Erlang cookie (`squeeze_cookie`)
-- workers join via `--manager manager@manager`
+Use that repo for:
 
-1. Ensure `moya_db` source exists at `~/moya_db` (used as compose build context).
-2. Build images:
+- docker-compose stack runs
+- cluster startup/teardown scripts
+- deployment docs and CI/CD harnessing
 
-```bash
-docker compose build
-```
+`moya_squeezer` remains focused on squeeze app logic and config.
 
-3. Run manager + workers + db:
+Container runtime config used by manager remains in this repo at:
 
-```bash
-docker compose up --abort-on-container-exit
-```
+- `config/docker.toml`
 
-This launches one `moya_squeezer:latest` image as 4 containers (1 manager, 3 workers).
-
-4. Tear down:
-
-```bash
-docker compose down
-```
-
-### If Compose is unavailable on your machine
-
-Use the provided scripts to run the same 1-manager + 3-worker topology with plain Docker:
-
-```bash
-chmod +x scripts/run_cluster.sh scripts/stop_cluster.sh
-./scripts/run_cluster.sh
-```
-
-Stop and clean up:
-
-```bash
-./scripts/stop_cluster.sh
-```
-
-Notes:
-
-- `scripts/run_cluster.sh` builds `moya_squeezer:latest`, creates `moya_net`, starts `moya_db`, then starts `worker1..3` and `manager`.
-- Workers join manager using distributed node names and shared cookie (`squeeze_cookie`).
-- Override defaults with env vars: `IMAGE_NAME`, `DB_IMAGE`, `NETWORK_NAME`, `COOKIE`, `CONFIG_PATH`.
-- For Colima/no-Docker-Hub workflows, the Dockerfile supports a local base image via `BASE_IMAGE` (default `elixir:1.19.0`). Example: `BASE_IMAGE=elixir:1.19.0 ./scripts/run_cluster.sh`.
-
-Container config lives at `config/docker.toml` and targets:
+with DB target:
 
 `base_url = "http://moya_db:9000"`
+
+## Benchmarking `metrics_flush_interval_ms`
+
+Use the helper script to run the same workload across multiple flush intervals and
+produce a summary CSV:
+
+```bash
+zsh scripts/benchmark_flush_interval.sh config/local.toml
+```
+
+Optional environment variables:
+
+- `INTERVALS` (default `5,10,20,50`)
+- `OUT_DIR` (default `logs`)
+- `RUN_CMD` (default `./scripts/squeezer.sh`)
+
+Example:
+
+```bash
+INTERVALS=5,10,20,50 OUT_DIR=logs zsh scripts/benchmark_flush_interval.sh config/local.toml
+```
+
+The script writes one run log per interval and a summary CSV with:
+
+`interval_ms,stop_reason,total,error_rate_pct,p95_ms,run_log`
 
 ## Config fields (TOML)
 
@@ -143,6 +141,12 @@ Container config lives at `config/docker.toml` and targets:
 - `start_requests_per_second`: Initial target throughput for squeeze ramp (defaults to `requests_per_second`).
 - `rps_step`: Amount to increase total target RPS at each ramp step (default `0`).
 - `step_interval_seconds`: Seconds between ramp steps (default `5`).
+- `ramp_mode`: Ramp strategy, `rps` or `concurrency` (default `rps`).
+- `total_target_rps`: Total measured-phase target RPS used by `concurrency` mode (default `requests_per_second`).
+- `initial_active_workers`: Starting active worker count in `concurrency` mode (default `1`).
+- `worker_step`: Active workers to add per ramp step in `concurrency` mode (default `1`).
+- `worker_step_interval_seconds`: Seconds between worker activation steps in `concurrency` mode (default `step_interval_seconds`).
+- `max_active_workers`: Max active workers in `concurrency` mode (default `connections`).
 - `baseline_window_seconds`: Baseline measurement window after burn-in, used to compute baseline p90 (default `10`).
 - `max_error_rate_pct`: Error-rate stop threshold percentage for measured phase (default `1.0`).
 - `read_ratio`, `write_ratio`, `delete_ratio`: Must sum to `1.0`.
@@ -152,6 +156,7 @@ Container config lives at `config/docker.toml` and targets:
 - `request_timeout_ms`: Adapter request timeout in ms (default `5000`).
 - `max_retries`: Retry attempts for transport errors and HTTP 5xx (default `0`).
 - `retry_backoff_ms`: Linear retry backoff base in ms (default `25`).
+- `metrics_flush_interval_ms`: Buffered metrics flush interval in ms (default `10`).
 - `base_url`: API base URL (defaults to `http://localhost:9000`).
 - `read_path`, `write_path`, `delete_path`: Endpoint base paths (defaults `/db/v0.1` for moya_db compatibility).
 - `log_path`: Append-only metrics log path.
@@ -160,9 +165,9 @@ Container config lives at `config/docker.toml` and targets:
 
 CSV columns:
 
-`bucket_ms,request_type,started_at_ms,db_latency_us,response_code`
+`bucket_ms,source_node,request_type,started_at_ms,db_latency_us,response_code`
 
-- `bucket_ms` is rounded down to 5ms buckets from `started_at_ms`.
+- `bucket_ms` is rounded down by `metrics_flush_interval_ms` from `started_at_ms`.
 - `response_code` is `0` when the request errors before receiving an HTTP response.
 
 ## Runtime console output
@@ -187,7 +192,9 @@ After burn-in, the runner:
 
 1. Runs baseline collection for `baseline_window_seconds`.
 2. Captures baseline p90 latency.
-3. Starts/increments target RPS from `start_requests_per_second` by `rps_step` every `step_interval_seconds`.
+3. Ramps load according to `ramp_mode`:
+   - `rps`: starts/increments target RPS from `start_requests_per_second` by `rps_step` every `step_interval_seconds`.
+   - `concurrency`: starts with `initial_active_workers` and activates additional workers by `worker_step` every `worker_step_interval_seconds` up to `max_active_workers`, redistributing `total_target_rps` across active workers.
 4. Stops when one of the following occurs:
    - `duration_seconds` elapsed
    - measured error rate exceeds `max_error_rate_pct`

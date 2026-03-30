@@ -5,7 +5,7 @@ defmodule MoyaSqueezer.Config do
 
   @required_integer_fields ~w(connections requests_per_second payload_size duration_seconds)a
   @optional_nonneg_integer_fields ~w(max_retries retry_backoff_ms warmup_seconds rps_step)a
-  @optional_positive_integer_fields ~w(request_timeout_ms step_interval_seconds baseline_window_seconds)a
+  @optional_positive_integer_fields ~w(request_timeout_ms step_interval_seconds baseline_window_seconds metrics_flush_interval_ms total_target_rps initial_active_workers worker_step worker_step_interval_seconds max_active_workers)a
   @required_ratio_fields ~w(read_ratio write_ratio delete_ratio)a
 
   @enforce_keys [
@@ -26,7 +26,14 @@ defmodule MoyaSqueezer.Config do
     :rps_step,
     :step_interval_seconds,
     :baseline_window_seconds,
-    :max_error_rate_pct
+    :max_error_rate_pct,
+    :metrics_flush_interval_ms,
+    :ramp_mode,
+    :total_target_rps,
+    :initial_active_workers,
+    :worker_step,
+    :worker_step_interval_seconds,
+    :max_active_workers
   ]
   defstruct [
     :connections,
@@ -47,6 +54,13 @@ defmodule MoyaSqueezer.Config do
     :step_interval_seconds,
     :baseline_window_seconds,
     :max_error_rate_pct,
+    :metrics_flush_interval_ms,
+    :ramp_mode,
+    :total_target_rps,
+    :initial_active_workers,
+    :worker_step,
+    :worker_step_interval_seconds,
+    :max_active_workers,
     read_path: "/db/v0.1",
     write_path: "/db/v0.1",
     delete_path: "/db/v0.1"
@@ -71,6 +85,13 @@ defmodule MoyaSqueezer.Config do
           step_interval_seconds: pos_integer(),
           baseline_window_seconds: pos_integer(),
           max_error_rate_pct: float(),
+          metrics_flush_interval_ms: pos_integer(),
+          ramp_mode: :rps | :concurrency,
+          total_target_rps: pos_integer(),
+          initial_active_workers: pos_integer(),
+          worker_step: pos_integer(),
+          worker_step_interval_seconds: pos_integer(),
+          max_active_workers: pos_integer(),
           read_path: String.t(),
           write_path: String.t(),
           delete_path: String.t()
@@ -97,6 +118,7 @@ defmodule MoyaSqueezer.Config do
          :ok <- validate_required_ratio_fields(map),
          :ok <- validate_optional_nonneg_integer_fields(map),
          :ok <- validate_optional_positive_integer_fields(map),
+         :ok <- validate_ramp_mode(map),
          :ok <- validate_ratios_sum(map) do
       {:ok,
        %__MODULE__{
@@ -119,6 +141,13 @@ defmodule MoyaSqueezer.Config do
          step_interval_seconds: fetch_optional(map, :step_interval_seconds, 5),
          baseline_window_seconds: fetch_optional(map, :baseline_window_seconds, 10),
          max_error_rate_pct: ratio(fetch_optional(map, :max_error_rate_pct, 1.0)),
+         metrics_flush_interval_ms: fetch_optional(map, :metrics_flush_interval_ms, 10),
+         ramp_mode: parse_ramp_mode(fetch_optional(map, :ramp_mode, "rps")),
+         total_target_rps: fetch_optional(map, :total_target_rps, fetch_required(map, :requests_per_second)),
+         initial_active_workers: fetch_optional(map, :initial_active_workers, 1),
+         worker_step: fetch_optional(map, :worker_step, 1),
+         worker_step_interval_seconds: fetch_optional(map, :worker_step_interval_seconds, fetch_optional(map, :step_interval_seconds, 5)),
+         max_active_workers: fetch_optional(map, :max_active_workers, fetch_required(map, :connections)),
          read_path: fetch_optional(map, :read_path, "/db/v0.1"),
          write_path: fetch_optional(map, :write_path, "/db/v0.1"),
          delete_path: fetch_optional(map, :delete_path, "/db/v0.1")
@@ -206,6 +235,17 @@ defmodule MoyaSqueezer.Config do
       end
     end)
   end
+
+  defp validate_ramp_mode(map) do
+    case parse_ramp_mode(fetch_optional(map, :ramp_mode, "rps")) do
+      mode when mode in [:rps, :concurrency] -> :ok
+      _ -> {:error, "ramp_mode must be one of: rps, concurrency"}
+    end
+  end
+
+  defp parse_ramp_mode(value) when value in [:rps, "rps"], do: :rps
+  defp parse_ramp_mode(value) when value in [:concurrency, "concurrency"], do: :concurrency
+  defp parse_ramp_mode(_), do: :invalid
 
   defp ratio(value) when is_integer(value), do: value / 1
   defp ratio(value) when is_float(value), do: value

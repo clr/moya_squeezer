@@ -44,6 +44,9 @@ defmodule MoyaSqueezer.ConnectionWorker do
   @spec set_reqs_per_sec(pid() | atom(), float()) :: :ok
   def set_reqs_per_sec(worker, reqs_per_sec), do: GenServer.cast(worker, {:set_reqs_per_sec, reqs_per_sec})
 
+  @spec set_mode(pid() | atom(), :warmup | :measured) :: :ok
+  def set_mode(worker, mode) when mode in [:warmup, :measured], do: GenServer.cast(worker, {:set_mode, mode})
+
   @impl true
   def init(opts) do
     state = %__MODULE__{
@@ -82,6 +85,11 @@ defmodule MoyaSqueezer.ConnectionWorker do
   @impl true
   def handle_cast({:set_reqs_per_sec, reqs_per_sec}, state) when is_number(reqs_per_sec) do
     {:noreply, %{state | reqs_per_sec: reqs_per_sec / 1}}
+  end
+
+  @impl true
+  def handle_cast({:set_mode, mode}, state) when mode in [:warmup, :measured] do
+    {:noreply, %{state | mode: mode}}
   end
 
   defp send_one_request(state) do
@@ -136,22 +144,58 @@ defmodule MoyaSqueezer.ConnectionWorker do
     end
   end
 
-  defp choose_key_for_request(:write, state), do: MoyaSqueezer.KeyPool.next_new_key(state.key_pool)
+  defp choose_key_for_request(:write, state), do: safe_next_new_key(state)
 
   defp choose_key_for_request(_type, state) do
-    case MoyaSqueezer.KeyPool.random_existing_key(state.key_pool) do
+    case safe_random_existing_key(state) do
       {:ok, key} -> key
-      :empty -> MoyaSqueezer.KeyPool.next_new_key(state.key_pool)
+      :empty -> safe_next_new_key(state)
     end
   end
 
   defp maybe_update_key_pool(:write, key, status, state) when status >= 200 and status < 300 do
-    MoyaSqueezer.KeyPool.note_write_success(state.key_pool, key)
+    safe_note_write_success(state, key)
   end
 
   defp maybe_update_key_pool(:delete, key, status, state) when status >= 200 and status < 300 do
-    MoyaSqueezer.KeyPool.note_delete_success(state.key_pool, key)
+    safe_note_delete_success(state, key)
   end
 
   defp maybe_update_key_pool(_type, _key, _status, _state), do: :ok
+
+  defp safe_random_existing_key(state) do
+    try do
+      MoyaSqueezer.KeyPool.random_existing_key(state.key_pool)
+    catch
+      :exit, _ -> :empty
+    end
+  end
+
+  defp safe_next_new_key(state) do
+    try do
+      MoyaSqueezer.KeyPool.next_new_key(state.key_pool)
+    catch
+      :exit, _ -> fallback_key(state)
+    end
+  end
+
+  defp safe_note_write_success(state, key) do
+    try do
+      MoyaSqueezer.KeyPool.note_write_success(state.key_pool, key)
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  defp safe_note_delete_success(state, key) do
+    try do
+      MoyaSqueezer.KeyPool.note_delete_success(state.key_pool, key)
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  defp fallback_key(state) do
+    "fallback_#{node()}_#{state.id}_#{System.unique_integer([:positive])}"
+  end
 end

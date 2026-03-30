@@ -2,12 +2,5 @@
 
 set -euo pipefail
 
-NETWORK_NAME="${NETWORK_NAME:-moya_net}"
-
-echo "[cluster] stopping containers"
-docker rm -f manager worker1 worker2 worker3 moya_db >/dev/null 2>&1 || true
-
-echo "[cluster] removing network ${NETWORK_NAME}"
-docker network rm "${NETWORK_NAME}" >/dev/null 2>&1 || true
-
-echo "[cluster] stopped"
+echo "[deprecated] cluster deployment moved to /Users/clr/moya_harness"
+exec /Users/clr/moya_harness/scripts/stop_cluster.sh "$@"
