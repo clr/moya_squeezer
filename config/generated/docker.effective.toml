@@ -1,17 +1,23 @@
-connections = 25
+connections_per_worker = 25
 requests_per_second = 500
 start_requests_per_second = 1500
 rps_step = 50
 step_interval_seconds = 5
 baseline_window_seconds = 10
 max_error_rate_pct = 1.0
+error_breach_consecutive_windows = 5
+stop_latency_percentile = 0.95
+latency_breach_consecutive_windows = 5
+worker_tick_ms = 10
+worker_inflight_limit = 25
+worker_step_interval_seconds = 5
 
 read_ratio = 0.70
 write_ratio = 0.25
 delete_ratio = 0.05
 
 payload_size = 1024
-duration_seconds = 10
+duration_seconds = 60
 warmup_seconds = 10
 
 # HTTP adapter controls
@@ -21,6 +27,10 @@ retry_backoff_ms = 25
 
 # Metrics logger controls
 metrics_flush_interval_ms = 10
+metrics_compact = true
+
+# Worker stats -> manager aggregation controls
+stats_flush_interval_ms = 100
 
 base_url = "http://moya_db:9000"
 read_path = "/db/v0.1"
@@ -28,9 +38,8 @@ write_path = "/db/v0.1"
 delete_path = "/db/v0.1"
 
 log_path = "logs/squeeze_metrics.csv"
-worker_step_interval_seconds = 1
 worker_step = 1
-initial_active_workers = 3
+initial_active_workers = 4
 ramp_mode = "concurrency"
-max_active_workers = 100
-total_target_rps = 15000
+max_active_workers = 20
+total_target_rps = 10000

@@ -5,6 +5,9 @@ defmodule MoyaSqueezer do
 
   alias MoyaSqueezer.Runner
 
+  @spec hello() :: :world
+  def hello, do: :world
+
   @spec run(String.t(), keyword()) :: :ok | {:error, term()}
   def run(config_path, opts \\ []), do: Runner.run_from_file(config_path, opts)
 
