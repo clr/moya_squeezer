@@ -13,13 +13,14 @@ defmodule Mix.Tasks.Squeezer.Run do
 
   @shortdoc "Run manager/worker squeeze test node"
 
-  @switches [role: :string, manager: :string, worker: :keep]
+  @switches [role: :string, manager: :string, worker: :keep, adapter: :string]
 
   @impl true
   def run(args) do
     Mix.Task.run("app.start")
 
     {opts, positional, _invalid} = OptionParser.parse(args, strict: @switches)
+    maybe_set_adapter(opts)
     role = opts[:role] || "manager"
 
     case role do
@@ -51,6 +52,15 @@ defmodule Mix.Tasks.Squeezer.Run do
     case MoyaSqueezer.run_worker(String.to_atom(manager)) do
       :ok -> Mix.shell().info("Worker stopped.")
       {:error, reason} -> Mix.raise("Worker failed: #{reason}")
+    end
+  end
+
+  defp maybe_set_adapter(opts) do
+    case opts[:adapter] do
+      nil -> :ok
+      "finch" -> Application.put_env(:moya_squeezer, :load_adapter, MoyaSqueezer.Adapters.HttpAdapter)
+      "httpc" -> Application.put_env(:moya_squeezer, :load_adapter, MoyaSqueezer.Adapters.HttpcAdapter)
+      other -> Mix.raise("Unknown adapter '#{other}'. Expected 'finch' or 'httpc'.")
     end
   end
 end

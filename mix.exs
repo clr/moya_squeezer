@@ -21,7 +21,9 @@ defmodule MoyaSqueezer.MixProject do
   defp deps do
     [
       {:finch, "~> 0.19"},
-      {:toml, "~> 0.7"}
+      {:toml, "~> 0.7"},
+      {:plug_cowboy, "~> 2.7"},
+      {:jason, "~> 1.4"}
     ]
   end
 end

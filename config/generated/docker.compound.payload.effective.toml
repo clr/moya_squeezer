@@ -1,7 +1,7 @@
 connections_per_worker = 25
 requests_per_second = 500
-start_requests_per_second = 3000
-rps_step = 100
+start_requests_per_second = 1000
+rps_step = 0
 step_interval_seconds = 1
 baseline_window_seconds = 10
 max_error_rate_pct = 1.0
@@ -16,7 +16,7 @@ read_ratio = 0.70
 write_ratio = 0.25
 delete_ratio = 0.05
 
-payload_size = 1024
+payload_size = 65536
 duration_seconds = 60
 warmup_seconds = 10
 
@@ -38,5 +38,7 @@ write_path = "/db/v0.1"
 delete_path = "/db/v0.1"
 
 log_path = "logs/squeeze_metrics.csv"
-ramp_mode = "rps"
+ramp_mode = "payload"
+payload_step_bytes = 65536
 feel_the_burn_seconds = 10
+
