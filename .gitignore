@@ -11,3 +11,4 @@ erl_crash.dump
 .hex/
 .mix/
 /logs/
+.DS_Store

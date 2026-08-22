@@ -4,12 +4,18 @@ defmodule MoyaSqueezer do
   """
 
   alias MoyaSqueezer.Runner
+  alias MoyaSqueezer.RuntimeState
+
+  @spec hello() :: :world
+  def hello, do: :world
 
   @spec run(String.t(), keyword()) :: :ok | {:error, term()}
   def run(config_path, opts \\ []), do: Runner.run_from_file(config_path, opts)
 
   @spec run_worker(node()) :: :ok | {:error, term()}
   def run_worker(manager_node) do
+    RuntimeState.set_role(:worker)
+
     cond do
       not Node.alive?() ->
         {:error, "worker node is not distributed; start with --sname/--name and --cookie"}

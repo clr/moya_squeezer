@@ -24,7 +24,7 @@ defmodule MoyaSqueezer.RunnerTest do
 
     assert {:ok, config} =
              Config.from_map(%{
-               connections: 1,
+               connections_per_worker: 1,
                requests_per_second: 10,
                start_requests_per_second: 10,
                rps_step: 0,
@@ -39,7 +39,7 @@ defmodule MoyaSqueezer.RunnerTest do
                log_path: "logs/test_runner_metrics.csv"
              })
 
-    output = capture_io(fn -> assert :ok = Runner.run(config) end)
+    output = capture_io(fn -> assert :ok = Runner.run(config, worker_nodes: [node()]) end)
 
     assert output =~ "[final]"
     assert output =~ "stop_reason=duration_elapsed"
@@ -54,7 +54,7 @@ defmodule MoyaSqueezer.RunnerTest do
 
     assert {:ok, config} =
              Config.from_map(%{
-               connections: 1,
+               connections_per_worker: 1,
                requests_per_second: 10,
                start_requests_per_second: 10,
                rps_step: 0,

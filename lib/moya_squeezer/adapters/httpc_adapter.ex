@@ -1,12 +1,14 @@
-defmodule MoyaSqueezer.Adapters.HttpAdapter do
+defmodule MoyaSqueezer.Adapters.HttpcAdapter do
   @moduledoc """
-  Default adapter that sends read/write/delete calls over HTTP.
+  Lightweight adapter using Erlang :httpc (inets) for read/write/delete calls.
   """
 
   @behaviour MoyaSqueezer.LoadAdapter
 
   @impl true
   def request(type, payload_size, adapter_opts, key_override \\ nil) do
+    _ = ensure_httpc_started()
+
     base_url = Map.fetch!(adapter_opts, :base_url)
     key = key_override || Integer.to_string(System.unique_integer([:positive, :monotonic]))
     payload = payload(payload_size)
@@ -18,15 +20,15 @@ defmodule MoyaSqueezer.Adapters.HttpAdapter do
       case type do
         :read ->
           path = Map.get(adapter_opts, :read_path, "/db/v0.1")
-          {:get, "#{base_url}#{path}/#{key}", "", []}
+          {:get, "#{base_url}#{path}/#{key}", ~c"", []}
 
         :write ->
           path = Map.get(adapter_opts, :write_path, "/db/v0.1")
-          {:post, "#{base_url}#{path}/#{key}", payload, [{"content-type", "application/json"}]}
+          {:post, "#{base_url}#{path}/#{key}", payload, [{~c"content-type", ~c"application/json"}]}
 
         :delete ->
           path = Map.get(adapter_opts, :delete_path, "/db/v0.1")
-          {:delete, "#{base_url}#{path}/#{key}", "", []}
+          {:delete, "#{base_url}#{path}/#{key}", ~c"", []}
       end
 
     do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, 0)
@@ -35,52 +37,43 @@ defmodule MoyaSqueezer.Adapters.HttpAdapter do
   defp do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt) do
     started_us = System.monotonic_time(:microsecond)
 
-    result = safe_finch_request(method, url, headers, body, timeout_ms)
+    result =
+      safe_httpc_request(method, url, headers, body, timeout_ms)
 
     db_latency_us = System.monotonic_time(:microsecond) - started_us
 
     case result do
-      {:ok, %Finch.Response{status: status}} when status >= 500 and attempt < max_retries ->
+      {:ok, status} when status >= 500 and attempt < max_retries ->
         backoff_sleep(retry_backoff_ms, attempt)
+        do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt + 1)
 
-        do_request(
-          method,
-          url,
-          headers,
-          body,
-          timeout_ms,
-          max_retries,
-          retry_backoff_ms,
-          attempt + 1
-        )
-
-      {:ok, %Finch.Response{status: status}} ->
+      {:ok, status} ->
         {:ok, status, db_latency_us}
 
       {:error, _reason} when attempt < max_retries ->
         backoff_sleep(retry_backoff_ms, attempt)
-
-        do_request(
-          method,
-          url,
-          headers,
-          body,
-          timeout_ms,
-          max_retries,
-          retry_backoff_ms,
-          attempt + 1
-        )
+        do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt + 1)
 
       {:error, reason} ->
         {:error, reason, db_latency_us}
     end
   end
 
-  defp safe_finch_request(method, url, headers, body, timeout_ms) do
+  defp safe_httpc_request(method, url, headers, body, timeout_ms) do
+    request =
+      case method do
+        :get -> {String.to_charlist(url), headers}
+        :delete -> {String.to_charlist(url), headers}
+        :post -> {String.to_charlist(url), headers, ~c"application/json", body}
+      end
+
+    opts = [timeout: timeout_ms]
+
     try do
-      method
-      |> Finch.build(url, headers, body)
-      |> Finch.request(MoyaSqueezerFinch, receive_timeout: timeout_ms)
+      case :httpc.request(method, request, opts, []) do
+        {:ok, {{_http, status, _reason}, _resp_headers, _resp_body}} -> {:ok, status}
+        {:error, reason} -> {:error, reason}
+      end
     rescue
       exception -> {:error, {:exception, exception}}
     catch
@@ -89,11 +82,17 @@ defmodule MoyaSqueezer.Adapters.HttpAdapter do
     end
   end
 
+  defp ensure_httpc_started do
+    _ = Application.ensure_all_started(:inets)
+    _ = Application.ensure_all_started(:ssl)
+    :ok
+  end
+
   defp backoff_sleep(backoff_ms, attempt) do
     Process.sleep(backoff_ms * (attempt + 1))
   end
 
   defp payload(size) do
-    "\"" <> :binary.copy("x", max(size, 1)) <> "\""
+    to_charlist("\"" <> :binary.copy("x", max(size, 1)) <> "\"")
   end
 end

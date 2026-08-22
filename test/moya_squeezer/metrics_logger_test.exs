@@ -11,7 +11,8 @@ defmodule MoyaSqueezer.MetricsLoggerTest do
       MetricsLogger.start_link(
         name: :metrics_logger_test_custom_interval,
         log_path: log_path,
-        flush_interval_ms: 20
+        flush_interval_ms: 20,
+        compact: false
       )
 
     MetricsLogger.log(logger, %{
@@ -52,6 +53,7 @@ defmodule MoyaSqueezer.MetricsLoggerTest do
     GenServer.stop(logger, :normal, 5_000)
 
     content = File.read!(log_path)
-    assert content =~ "0,nonode@nohost,write,123,1500,201"
+    assert content =~ "bucket_ms,source_node,request_type,response_code,count,sum_db_latency_us"
+    assert content =~ "120,nonode@nohost,write,201,1,1500"
   end
 end
