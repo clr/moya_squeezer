@@ -1,4 +1,4 @@
-defmodule MoyaSqueezer.ConnectionWorker do
+defmodule MoyaSqueezer.Adapters.ConnectionWorker do
   @moduledoc """
   Represents one logical client connection that continuously emits load.
   """

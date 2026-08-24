@@ -45,18 +45,18 @@ defmodule MoyaSqueezer.MetricsLogger do
       raise ArgumentError, "compact must be a boolean"
     end
 
+    state = %__MODULE__{buffer: [], flush_interval_ms: flush_interval_ms, compact: compact}
+    {:ok, state, {:continue, {:open_log, log_path}}}
+  end
+
+  @impl true
+  def handle_continue({:open_log, log_path}, state) do
     File.mkdir_p!(Path.dirname(log_path))
     {:ok, io_device} = File.open(log_path, [:append, :utf8])
+    :ok = IO.binwrite(io_device, csv_header(state.compact))
+    Process.send_after(self(), :flush, state.flush_interval_ms)
 
-    :ok =
-      IO.binwrite(
-        io_device,
-        csv_header(compact)
-      )
-
-    Process.send_after(self(), :flush, flush_interval_ms)
-
-    {:ok, %__MODULE__{io_device: io_device, buffer: [], flush_interval_ms: flush_interval_ms, compact: compact}}
+    {:noreply, %{state | io_device: io_device}}
   end
 
   @impl true

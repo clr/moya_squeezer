@@ -60,7 +60,8 @@ defmodule Mix.Tasks.Squeezer.Run do
       nil -> :ok
       "finch" -> Application.put_env(:moya_squeezer, :load_adapter, MoyaSqueezer.Adapters.HttpAdapter)
       "httpc" -> Application.put_env(:moya_squeezer, :load_adapter, MoyaSqueezer.Adapters.HttpcAdapter)
-      other -> Mix.raise("Unknown adapter '#{other}'. Expected 'finch' or 'httpc'.")
+      "mint" -> Application.put_env(:moya_squeezer, :load_adapter, MoyaSqueezer.Adapters.MintAdapter)
+      other -> Mix.raise("Unknown adapter '#{other}'. Expected 'finch', 'httpc', or 'mint'.")
     end
   end
 end

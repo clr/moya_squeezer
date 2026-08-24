@@ -3,57 +3,87 @@ defmodule MoyaSqueezer.MetricsLoggerTest do
 
   alias MoyaSqueezer.MetricsLogger
 
-  test "uses configured flush interval for bucket rounding" do
-    log_path = "logs/test_metrics_logger_custom_interval.csv"
-    File.rm(log_path)
+  describe "log/2 flush bucketing" do
+    test "uses configured flush interval for bucket rounding" do
+      log_path = "logs/test_metrics_logger_custom_interval.csv"
+      File.rm(log_path)
 
-    {:ok, logger} =
-      MetricsLogger.start_link(
-        name: :metrics_logger_test_custom_interval,
-        log_path: log_path,
-        flush_interval_ms: 20,
-        compact: false
-      )
+      {:ok, logger} =
+        MetricsLogger.start_link(
+          name: :metrics_logger_test_custom_interval,
+          log_path: log_path,
+          flush_interval_ms: 20,
+          compact: false
+        )
 
-    MetricsLogger.log(logger, %{
-      source_node: "nonode@nohost",
-      request_type: :read,
-      started_at_ms: 123,
-      db_latency_us: 1000,
-      response_code: 200
-    })
+      MetricsLogger.log(logger, %{
+        source_node: "nonode@nohost",
+        request_type: :read,
+        started_at_ms: 123,
+        db_latency_us: 1000,
+        response_code: 200
+      })
 
-    Process.sleep(50)
-    GenServer.stop(logger, :normal, 5_000)
+      Process.sleep(50)
+      GenServer.stop(logger, :normal, 5_000)
 
-    content = File.read!(log_path)
-    assert content =~ "bucket_ms,source_node,request_type,started_at_ms,db_latency_us,response_code"
-    assert content =~ "120,nonode@nohost,read,123,1000,200"
+      content = File.read!(log_path)
+      assert content =~ "bucket_ms,source_node,request_type,started_at_ms,db_latency_us,response_code"
+      assert content =~ "120,nonode@nohost,read,123,1000,200"
+    end
+
+    test "uses default flush interval when not provided" do
+      log_path = "logs/test_metrics_logger_default_interval.csv"
+      File.rm(log_path)
+
+      {:ok, logger} =
+        MetricsLogger.start_link(
+          name: :metrics_logger_test_default_interval,
+          log_path: log_path
+        )
+
+      MetricsLogger.log(logger, %{
+        source_node: "nonode@nohost",
+        request_type: :write,
+        started_at_ms: 123,
+        db_latency_us: 1500,
+        response_code: 201
+      })
+
+      Process.sleep(20)
+      GenServer.stop(logger, :normal, 5_000)
+
+      content = File.read!(log_path)
+      assert content =~ "bucket_ms,source_node,request_type,response_code,count,sum_db_latency_us"
+      assert content =~ "120,nonode@nohost,write,201,1,1500"
+    end
   end
 
-  test "uses default flush interval when not provided" do
-    log_path = "logs/test_metrics_logger_default_interval.csv"
-    File.rm(log_path)
+  describe "init/1 validation" do
+    # init/1 runs in the spawned GenServer process, which is linked to the
+    # caller — trap_exit turns that crash into a start_link error return
+    # instead of also killing this test process.
+    setup do
+      Process.flag(:trap_exit, true)
+      :ok
+    end
 
-    {:ok, logger} =
-      MetricsLogger.start_link(
-        name: :metrics_logger_test_default_interval,
-        log_path: log_path
-      )
+    test "raises when flush_interval_ms is not a positive integer" do
+      assert {:error, {%ArgumentError{message: "flush_interval_ms must be a positive integer"}, _stacktrace}} =
+               MetricsLogger.start_link(
+                 name: :metrics_logger_test_invalid_interval,
+                 log_path: "logs/test_metrics_logger_invalid_interval.csv",
+                 flush_interval_ms: 0
+               )
+    end
 
-    MetricsLogger.log(logger, %{
-      source_node: "nonode@nohost",
-      request_type: :write,
-      started_at_ms: 123,
-      db_latency_us: 1500,
-      response_code: 201
-    })
-
-    Process.sleep(20)
-    GenServer.stop(logger, :normal, 5_000)
-
-    content = File.read!(log_path)
-    assert content =~ "bucket_ms,source_node,request_type,response_code,count,sum_db_latency_us"
-    assert content =~ "120,nonode@nohost,write,201,1,1500"
+    test "raises when compact is not a boolean" do
+      assert {:error, {%ArgumentError{message: "compact must be a boolean"}, _stacktrace}} =
+               MetricsLogger.start_link(
+                 name: :metrics_logger_test_invalid_compact,
+                 log_path: "logs/test_metrics_logger_invalid_compact.csv",
+                 compact: "yes"
+               )
+    end
   end
 end

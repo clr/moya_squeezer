@@ -5,6 +5,8 @@ defmodule MoyaSqueezer.Adapters.HttpAdapter do
 
   @behaviour MoyaSqueezer.LoadAdapter
 
+  alias MoyaSqueezer.Adapters.RequestRetrier
+
   @impl true
   def request(type, payload_size, adapter_opts, key_override \\ nil) do
     base_url = Map.fetch!(adapter_opts, :base_url)
@@ -29,68 +31,24 @@ defmodule MoyaSqueezer.Adapters.HttpAdapter do
           {:delete, "#{base_url}#{path}/#{key}", "", []}
       end
 
-    do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, 0)
-  end
-
-  defp do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt) do
-    started_us = System.monotonic_time(:microsecond)
-
-    result = safe_finch_request(method, url, headers, body, timeout_ms)
-
-    db_latency_us = System.monotonic_time(:microsecond) - started_us
-
-    case result do
-      {:ok, %Finch.Response{status: status}} when status >= 500 and attempt < max_retries ->
-        backoff_sleep(retry_backoff_ms, attempt)
-
-        do_request(
-          method,
-          url,
-          headers,
-          body,
-          timeout_ms,
-          max_retries,
-          retry_backoff_ms,
-          attempt + 1
-        )
-
-      {:ok, %Finch.Response{status: status}} ->
-        {:ok, status, db_latency_us}
-
-      {:error, _reason} when attempt < max_retries ->
-        backoff_sleep(retry_backoff_ms, attempt)
-
-        do_request(
-          method,
-          url,
-          headers,
-          body,
-          timeout_ms,
-          max_retries,
-          retry_backoff_ms,
-          attempt + 1
-        )
-
-      {:error, reason} ->
-        {:error, reason, db_latency_us}
-    end
+    send_fun = fn -> safe_finch_request(method, url, headers, body, timeout_ms) end
+    RequestRetrier.run(send_fun, max_retries, retry_backoff_ms)
   end
 
   defp safe_finch_request(method, url, headers, body, timeout_ms) do
     try do
-      method
-      |> Finch.build(url, headers, body)
-      |> Finch.request(MoyaSqueezerFinch, receive_timeout: timeout_ms)
+      case method
+           |> Finch.build(url, headers, body)
+           |> Finch.request(MoyaSqueezerFinch, receive_timeout: timeout_ms) do
+        {:ok, %Finch.Response{status: status}} -> {:ok, status}
+        {:error, reason} -> {:error, reason}
+      end
     rescue
       exception -> {:error, {:exception, exception}}
     catch
       :exit, reason -> {:error, {:exit, reason}}
       kind, reason -> {:error, {kind, reason}}
     end
-  end
-
-  defp backoff_sleep(backoff_ms, attempt) do
-    Process.sleep(backoff_ms * (attempt + 1))
   end
 
   defp payload(size) do

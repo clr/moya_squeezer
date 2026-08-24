@@ -5,6 +5,8 @@ defmodule MoyaSqueezer.Adapters.HttpcAdapter do
 
   @behaviour MoyaSqueezer.LoadAdapter
 
+  alias MoyaSqueezer.Adapters.RequestRetrier
+
   @impl true
   def request(type, payload_size, adapter_opts, key_override \\ nil) do
     _ = ensure_httpc_started()
@@ -31,32 +33,8 @@ defmodule MoyaSqueezer.Adapters.HttpcAdapter do
           {:delete, "#{base_url}#{path}/#{key}", ~c"", []}
       end
 
-    do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, 0)
-  end
-
-  defp do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt) do
-    started_us = System.monotonic_time(:microsecond)
-
-    result =
-      safe_httpc_request(method, url, headers, body, timeout_ms)
-
-    db_latency_us = System.monotonic_time(:microsecond) - started_us
-
-    case result do
-      {:ok, status} when status >= 500 and attempt < max_retries ->
-        backoff_sleep(retry_backoff_ms, attempt)
-        do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt + 1)
-
-      {:ok, status} ->
-        {:ok, status, db_latency_us}
-
-      {:error, _reason} when attempt < max_retries ->
-        backoff_sleep(retry_backoff_ms, attempt)
-        do_request(method, url, headers, body, timeout_ms, max_retries, retry_backoff_ms, attempt + 1)
-
-      {:error, reason} ->
-        {:error, reason, db_latency_us}
-    end
+    send_fun = fn -> safe_httpc_request(method, url, headers, body, timeout_ms) end
+    RequestRetrier.run(send_fun, max_retries, retry_backoff_ms)
   end
 
   defp safe_httpc_request(method, url, headers, body, timeout_ms) do
@@ -86,10 +64,6 @@ defmodule MoyaSqueezer.Adapters.HttpcAdapter do
     _ = Application.ensure_all_started(:inets)
     _ = Application.ensure_all_started(:ssl)
     :ok
-  end
-
-  defp backoff_sleep(backoff_ms, attempt) do
-    Process.sleep(backoff_ms * (attempt + 1))
   end
 
   defp payload(size) do
